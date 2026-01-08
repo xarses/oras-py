@@ -1,5 +1,6 @@
 import requests
 
+from .base import AuthBackend
 from .basic import BasicAuth
 from .token import TokenAuth
 

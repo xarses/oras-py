@@ -2,7 +2,7 @@ __author__ = "Vanessa Sochat"
 __copyright__ = "Copyright The ORAS Authors."
 __license__ = "Apache-2.0"
 
-
+import requests
 from typing import Optional
 
 import oras.auth.utils as auth_utils
@@ -23,6 +23,11 @@ class AuthBackend:
     def get_auth_header(self):
         raise NotImplementedError
 
+    def authenticate_request(
+        self, original: requests.Response, headers: dict, refresh=False
+    ):
+        raise NotImplementedError
+
     def get_container(self, name: container_type) -> oras.container.Container:
         """
         Courtesy function to get a container from a URI.
@@ -32,7 +37,7 @@ class AuthBackend:
         """
         if isinstance(name, oras.container.Container):
             return name
-        return oras.container.Container(name, registry=self.hostname)
+        return oras.container.Container(name, registry=self)
 
     def logout(self, hostname: str):
         """

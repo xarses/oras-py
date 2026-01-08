@@ -14,6 +14,7 @@ from typing import Callable, Generator, List, Optional, Tuple, Union
 
 import jsonschema
 import requests
+import requests.adapters
 
 import oras.auth
 import oras.container
@@ -27,6 +28,8 @@ from oras.logger import logger
 from oras.types import container_type
 from oras.utils.fileio import PathAndOptionalContent
 
+auth_type = Union[str, oras.auth.AuthBackend]
+
 
 @contextmanager
 def temporary_empty_config() -> Generator[str, None, None]:
@@ -34,6 +37,17 @@ def temporary_empty_config() -> Generator[str, None, None]:
         config_file = oras.utils.get_tmpfile(tmpdir=tmpdir, suffix=".json")
         oras.utils.write_file(config_file, "{}")
         yield config_file
+
+
+class RequestsLogger(requests.adapters.HTTPAdapter):
+    def send(self, request, **kwargs):
+        logger.info(f"Request: {request.method} {request.url}")
+        logger.info(f"Headers: {request.headers}")
+        response = super().send(request, **kwargs)
+        logger.info(f"Response: {response.status_code}")
+        logger.info(f"Headers: {response.headers}")
+        logger.info(response.text)
+        return response
 
 
 class Registry:
@@ -49,7 +63,7 @@ class Registry:
         hostname: Optional[str] = None,
         insecure: bool = False,
         tls_verify: bool = True,
-        auth_backend: str = "token",
+        auth_backend: auth_type = "token",
     ):
         """
         Create an ORAS client.
@@ -77,8 +91,12 @@ class Registry:
         # trying to set further CSRF cookies (Harbor is such a case)
         self.session.cookies.set_policy(DefaultCookiePolicy(allowed_domains=[]))
 
-        # Get custom backend, pass on session to share
-        self.auth = oras.auth.get_auth_backend(auth_backend, self.session)
+        if isinstance(auth_backend, str):
+            # Get custom backend, pass on session to share
+            self.auth = oras.auth.get_auth_backend(auth_backend, self.session)
+        else:
+            self.auth = auth_backend
+            self.auth.session = self.session
 
     def __repr__(self) -> str:
         return str(self)
@@ -931,7 +949,7 @@ class Registry:
         jsonschema.validate(manifest, schema=oras.schemas.manifest)
         return manifest
 
-    @decorator.classretry
+    # @decorator.classretry
     def do_request(
         self,
         url: str,
@@ -975,7 +993,9 @@ class Registry:
         # Otherwise, authenticate the request and retry
         headers, changed = self.auth.authenticate_request(response, headers)
         if not changed:
-            raise ValueError("Cannot respond to request for authentication.")
+            raise oras.auth.AuthenticationException(
+                "Cannot respond to request for authentication."
+            )
         response = self.session.request(
             method,
             url,
